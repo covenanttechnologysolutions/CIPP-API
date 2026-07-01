@@ -12,7 +12,7 @@ function Compare-CIPPIntuneObject {
         [Parameter(Mandatory = $false)]
         [string[]]$CompareType = @()
     )
-    if ($CompareType -ne 'Catalog') {
+    if ($CompareType -notcontains 'Catalog') {
         $defaultExcludeProperties = @(
             'id',
             'createdDateTime',
@@ -35,7 +35,8 @@ function Compare-CIPPIntuneObject {
             'isSynced'
             'locationInfo',
             'templateId',
-            'source'
+            'source',
+            'package'
         )
 
         $excludeProps = $defaultExcludeProperties + $ExcludeProperties
@@ -173,11 +174,12 @@ function Compare-CIPPIntuneObject {
                 if (ShouldCompareAsUnorderedSet -PropertyPath $PropertyPath) {
                     # For unordered sets, compare contents regardless of order
                     if ($Object1.Count -ne $Object2.Count) {
-                        # Different lengths - report the difference
+                        # Different lengths - report the actual values so a technician
+                        # can see exactly what differs and decide on the action.
                         $result.Add([PSCustomObject]@{
                                 Property      = $PropertyPath
-                                ExpectedValue = "Array with $($Object1.Count) items"
-                                ReceivedValue = "Array with $($Object2.Count) items"
+                                ExpectedValue = ($Object1 -join ', ')
+                                ReceivedValue = ($Object2 -join ', ')
                             })
                     } else {
                         # Same length - check if all items exist in both arrays
@@ -362,7 +364,7 @@ function Compare-CIPPIntuneObject {
             return $null
         }
     } else {
-        $intuneCollection = Get-Content .\intuneCollection.json | ConvertFrom-Json -ErrorAction SilentlyContinue
+        $intuneCollection = Get-Content "$env:CIPPRootPath\Config\intuneCollection.json" | ConvertFrom-Json -ErrorAction SilentlyContinue
         # Build a hashtable index for O(1) lookups instead of O(n) Where-Object scans
         $intuneCollectionIndex = @{}
         foreach ($item in $intuneCollection) {
