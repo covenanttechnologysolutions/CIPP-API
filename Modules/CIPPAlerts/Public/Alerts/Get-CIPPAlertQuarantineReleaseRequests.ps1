@@ -11,29 +11,22 @@
         $TenantFilter
     )
 
-    #Add rerun protection: This Monitor can only run once every hour.
-    $Rerun = Test-CIPPRerun -TenantFilter $TenantFilter -Type 'ExchangeMonitor' -API 'Get-CIPPAlertQuarantineReleaseRequests'
-    if ($Rerun) {
-        return
-    }
-    $HasLicense = Test-CIPPStandardLicense -StandardName 'QuarantineReleaseRequests' -TenantFilter $TenantFilter -RequiredCapabilities @(
-        'EXCHANGE_S_STANDARD',
-        'EXCHANGE_S_ENTERPRISE',
-        'EXCHANGE_S_STANDARD_GOV',
-        'EXCHANGE_S_ENTERPRISE_GOV',
-        'EXCHANGE_LITE'
-    )
+    $HasLicense = Test-CIPPStandardLicense -StandardName 'QuarantineReleaseRequests' -TenantFilter $TenantFilter -Preset Exchange
 
     if (-not $HasLicense) {
         return
     }
 
     try {
+        # The received-date window has to be wide enough to catch a release request raised some time after
+        # the message was quarantined. The old 6-hour window missed most of them; a one-day window suits an
+        # hourly-scheduled alert. (The Quarantine page applies no received-date filter, which is why the
+        # request is visible there while no webhook or email is ever sent.)
         $cmdParams = @{
             PageSize          = 1000
             ReleaseStatus     = 'Requested'
-            StartReceivedDate = (Get-Date).AddHours(-6)
-            EndReceivedDate   = (Get-Date).AddHours(0)
+            StartReceivedDate = (Get-Date).AddDays(-1)
+            EndReceivedDate   = (Get-Date)
         }
         $RequestedReleases = New-ExoRequest -tenantid $TenantFilter -cmdlet 'Get-QuarantineMessage' -cmdParams $cmdParams -ErrorAction Stop | Select-Object -ExcludeProperty *data.type* | Sort-Object -Property ReceivedTime
 

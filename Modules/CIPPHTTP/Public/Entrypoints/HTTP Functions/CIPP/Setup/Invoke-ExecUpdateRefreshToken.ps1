@@ -9,7 +9,9 @@ function Invoke-ExecUpdateRefreshToken {
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
 
-    $KV = $env:WEBSITE_DEPLOYMENT_ID
+    $APIName = $Request.Params.CIPPEndpoint
+    $Headers = $Request.Headers
+    $KV = Get-CippKeyVaultName
 
     try {
         # Handle refresh token update
@@ -31,13 +33,13 @@ function Invoke-ExecUpdateRefreshToken {
             Add-CIPPAzDataTableEntity @DevSecretsTable -Entity $Secret -Force
         } else {
             if ($IsPartnerTenant) {
-                Set-CippKeyVaultSecret -VaultName $kv -Name 'RefreshToken' -SecretValue (ConvertTo-SecureString -String $Request.body.refreshtoken -AsPlainText -Force)
+                $null = Set-CippKeyVaultSecret -VaultName $kv -Name 'RefreshToken' -SecretValue (ConvertTo-SecureString -String $Request.body.refreshtoken -AsPlainText -Force)
                 Set-Item -Path env:RefreshToken -Value $Request.body.refreshtoken -Force
             } else {
                 Write-Information "$($env:TenantID) does not match $($Request.body.tenantId) - adding a new secret for the tenant."
                 $name = $Request.body.tenantId
                 try {
-                    Set-CippKeyVaultSecret -VaultName $kv -Name $name -SecretValue (ConvertTo-SecureString -String $Request.body.refreshtoken -AsPlainText -Force)
+                    $null = Set-CippKeyVaultSecret -VaultName $kv -Name $name -SecretValue (ConvertTo-SecureString -String $Request.body.refreshtoken -AsPlainText -Force)
                     Set-Item -Path env:$name -Value $Request.body.refreshtoken -Force
                 } catch {
                     Write-Information "Failed to set secret $name in KeyVault. $($_.Exception.Message)"
@@ -60,7 +62,7 @@ function Invoke-ExecUpdateRefreshToken {
                     OrchestratorName = 'UpdatePermissionsOrchestrator'
                     Batch            = @($TenantBatch)
                 }
-                Start-CIPPOrchestrator -InputObject $InputObject
+                $null = Start-CIPPOrchestrator -InputObject $InputObject
                 Write-Information 'Started permissions update orchestrator for Partner Tenant'
             } catch {
                 Write-Warning "Failed to start permissions orchestrator: $($_.Exception.Message)"
@@ -72,11 +74,21 @@ function Invoke-ExecUpdateRefreshToken {
         } else {
             $TenantName = $request.body.tenantId
         }
+        $Result = "Successfully updated the credentials for $($TenantName). You may continue to the next step, or add additional tenants if required."
+        Write-LogMessage -headers $Headers -API $APIName -tenant $Request.body.tenantId -message $Result -Sev 'Info'
         $Results = @{
-            'resultText' = "Successfully updated the credentials for $($TenantName). You may continue to the next step, or add additional tenants if required."
+            'resultText' = $Result
             'state'      = 'success'
         }
+
+        return ([HttpResponseContext]@{
+                StatusCode = [HttpStatusCode]::OK
+                Body       = $Results
+            })
     } catch {
+        $ErrorMessage = Get-CippException -Exception $_
+        $Result = "Failed to update refresh token credentials. $($_.InvocationInfo.ScriptLineNumber): $($ErrorMessage.NormalizedError)"
+        Write-LogMessage -headers $Headers -API $APIName -tenant $Request.body.tenantId -message $Result -Sev 'Error' -LogData $ErrorMessage
         $Results = [pscustomobject]@{
             'Results' = @{
                 resultText = "Failed. $($_.InvocationInfo.ScriptLineNumber): $($_.Exception.message)"
